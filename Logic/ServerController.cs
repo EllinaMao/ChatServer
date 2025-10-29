@@ -201,7 +201,7 @@ namespace Logic
             }
         }
         // Внутри класса ServerController
-        private async Task BroadcastUserListAsync()
+        private async Task SendAllUsersListAsync()
         {
             // 1. Получаем актуальный список имен из менеджера
             List<string> userNames = _userManager.GetAllUserNames();
@@ -221,7 +221,7 @@ namespace Logic
             LogSystem($"SYSTEM: Список обновлен. {userNames.Count} пользователей онлайн.");
 
             // 4. Используем метод ClientManager для отправки всем
-            await _userManager.BroadcastMessageAsync(buffer);
+            await _userManager.SendMessageAsync(buffer);
         }
 
 
