@@ -83,7 +83,7 @@ namespace Logic
                 }
                 catch (System.Exception)
                 {
-                    //RemoveUser(pair.Key);//а зачем кст?
+                    RemoveUser(pair.Key);//а зачем кст?
                 }
             }
         }
