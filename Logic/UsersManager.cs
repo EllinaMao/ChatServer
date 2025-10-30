@@ -83,12 +83,42 @@ namespace Logic
                 }
                 catch (System.Exception)
                 {
-                    RemoveUser(pair.Key);//а зачем кст?
+                    RemoveUser(pair.Key);
                 }
             }
         }
+        /// <summary>
+        /// Принудительно закрывает все активные TCP-соединения
+        /// и очищает список пользователей.
+        /// Вызывается при остановке сервера.
+        /// </summary>
+        public void CloseAllConnections()
+        {
+            // ConcurrentDictionary безопасен для перебора,
+            // даже если сессия попытается сама себя удалить
+            foreach (var pair in _users)
+            {
+                try
+                {
+                    // 1. Закрываем сокет.
+                    // Это немедленно вызовет IOException или ObjectDisposedException
+                    // в задаче ClientSession.RunAsync(), которая слушает этот client.
+                    pair.Value.Close();
+                }
+                catch (Exception)
+                {
+                    // Игнорируем ошибки при остановке.
+                    // Клиент мог уже и сам отвалиться.
+                }
+            }
 
-  
+            // 2. Очищаем словарь.
+            // Блок 'finally' в ClientSession.RunAsync() тоже попытается
+            // вызвать RemoveUser, но это не страшно - он просто
+            // не найдет ключ и ничего не сделает.
+            _users.Clear();
+        }
+
     }
 
 }
