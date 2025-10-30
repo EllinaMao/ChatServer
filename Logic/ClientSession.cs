@@ -51,14 +51,31 @@ namespace Logic
 
                 string jsonRequest = Encoding.UTF8.GetString(buffer, 0, byteRead);
 
-                // (Ваш код парсинга имени)
-                var connectMsg = CommandMessage.FromJson(jsonRequest);
-                _userName = connectMsg.Name;
+                // "Подсматриваем" тип
+                var baseMsg = JsonSerializer.Deserialize<TcpMessage>(jsonRequest);
 
+                // Проверяем, что это ПРАВИЛЬНОЕ первое сообщение
+                if (baseMsg?.Type != "Connect")
+                {
+                    _logSystem($"TCP: Клиент {_clientEndpoint} отправил неверный первый пакет: '{baseMsg?.Type}'. Отключаем.");
+                    return; // Завершаем сессию
+                }
+
+                // Теперь парсим в полный класс ConnectMessage
+                var connectMsg = JsonSerializer.Deserialize<ConnectMessage>(jsonRequest);
+                _userName = connectMsg.Name;
+                //Проверяем, занято ли имя
                 if (!_userManager.AddUser(_userName, _tcpUser))
                 {
                     _logSystem($"TCP: Клиент {_clientEndpoint} попытался войти с занятым именем '{_userName}'.");
-                    // TODO: Отправить клиенту "имя занято"
+
+                    //Отправляем сообщение об ошибке
+                    var errorMsg = new ErrorMessage { Reason = $"Имя '{_userName}' уже занято." };
+                    string errorJson = JsonSerializer.Serialize(errorMsg);
+                    byte[] errorBuffer = Encoding.UTF8.GetBytes(errorJson);
+                    await _stream.WriteAsync(errorBuffer, 0, errorBuffer.Length);
+
+                    // Закрываем соединение и выходим
                     return;
                 }
 
@@ -82,6 +99,7 @@ namespace Logic
 
                     string clientJson = Encoding.UTF8.GetString(buffer, 0, byteRead);
 
+                    await ProcessTcpCommandAsync(clientJson);
                     // TODO: Обработать приватное сообщение.
                     // создать приватный метод ProcessPrivateMessage(clientJson)
                     // _logSystem($"PM от {_userName}: {clientJson}");
@@ -115,6 +133,68 @@ namespace Logic
                 {
                     _logSystem($"TCP: Клиент {_clientEndpoint} отсоединен (не успел зарегистрироваться).");
                 }
+            }
+        }
+
+        private async Task ProcessTcpCommandAsync(string json)
+        {
+            try
+            {
+                // 1. "Подсматриваем" тип
+                var baseMsg = JsonSerializer.Deserialize<TcpMessage>(json);
+
+                // 2. Выбираем, что делать
+                switch (baseMsg.Type)
+                {
+                    case "PrivateMessage":
+                        await HandlePrivateMessageAsync(json);
+                        break;
+
+                    // (Здесь в будущем могут быть "SetStatus", "ChangeName" и т.д.)    
+
+                    default:
+                        _logSystem($"TCP: Неизвестный тип сообщения от '{_userName}': {baseMsg.Type}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logSystem($"TCP: Ошибка парсинга JSON от '{_userName}': {ex.Message}");
+            }
+        }
+
+        // --- НОВЫЙ ПРИВАТНЫЙ МЕТОД ---
+        private async Task HandlePrivateMessageAsync(string json)
+        {
+            // 1. Парсим полное сообщение
+            var pmRequest = JsonSerializer.Deserialize<PrivateMessageRequest>(json);
+            if (pmRequest == null) return;
+
+            _logSystem($"TCP: PM от '{_userName}' для '{pmRequest.ToUser}'");
+
+            // 2. Ищем получателя
+            TcpClient recipientClient = _userManager.GetUser(pmRequest.ToUser);
+
+            if (recipientClient != null && recipientClient.Connected)
+            {
+                // 3. Создаем сообщение "на доставку"
+                var relayMsg = new PrivateMessageRelay
+                {
+                    FromUser = _userName, // (Важно: _userName - это мы, отправитель)
+                    Message = pmRequest.Message
+                };
+
+                // 4. Сериализуем и отправляем
+                string relayJson = JsonSerializer.Serialize(relayMsg);
+                byte[] buffer = Encoding.UTF8.GetBytes(relayJson);
+
+                await recipientClient.GetStream().WriteAsync(buffer, 0, buffer.Length);
+            }
+            else
+            {
+                // 5. (Опционально) Сказать отправителю, что юзер не найден
+                _logSystem($"TCP: Получатель '{pmRequest.ToUser}' не найден или оффлайн.");
+                // TODO: Отправить _stream.WriteAsync(...) сообщение об ошибке
             }
         }
 

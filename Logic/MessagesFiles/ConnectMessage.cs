@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 
 namespace Logic.MessagesFiles
 {
-    public class CommandMessage
+    public class ConnectMessage: TcpMessage
     {
-        public string Type { get; set; }
+        public ConnectMessage() { Type = "Connect"; }
         public string Name {  get; set; }
 
         public string ToJson()
@@ -17,9 +17,9 @@ namespace Logic.MessagesFiles
             return JsonSerializer.Serialize(this);
         }
 
-        public static CommandMessage? FromJson(string json)
+        public static ConnectMessage? FromJson(string json)
         {
-            return JsonSerializer.Deserialize<CommandMessage>(json);
+            return JsonSerializer.Deserialize<ConnectMessage>(json);
         }
 
 

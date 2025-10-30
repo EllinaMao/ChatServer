@@ -25,7 +25,6 @@ namespace Logic
             _udpListener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             _udpListener.Client.Bind(new IPEndPoint(IPAddress.Any, UDP_PORT));
             _udpListener.JoinMulticastGroup(MULTICAST_GROUP, IPAddress.Any);
-            _logSystem = logSystem;
         }
 
         public async Task StartListeningAsync()
