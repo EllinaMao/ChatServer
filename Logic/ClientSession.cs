@@ -10,7 +10,7 @@ namespace Logic
         private readonly TcpClient _tcpUser;
         private readonly UsersManager _userManager;
         private readonly ChatHistoryManager _historyManager;
-
+        private readonly PrivateHistoryManager _privateHistoryManager;
         // способ сказать "серверу", что пора обновить списки.
         private readonly Func<Task> _broadcastUserListCallback;
 
@@ -22,6 +22,7 @@ namespace Logic
         public ClientSession(TcpClient tcpUser,
                              UsersManager userManager,
                              ChatHistoryManager historyManager,
+                             PrivateHistoryManager privateHistoryManager,
                              Func<Task> broadcastUserListCallback,
                              Action<string> logSystem)
         {
@@ -30,6 +31,7 @@ namespace Logic
             _historyManager = historyManager;
             _broadcastUserListCallback = broadcastUserListCallback;
             _logSystem = logSystem; // Получаем метод LogSystem от сервера
+            _privateHistoryManager = privateHistoryManager;
 
             _clientEndpoint = tcpUser?.Client?.RemoteEndPoint?.ToString() ?? "unknown";
         }
@@ -41,7 +43,7 @@ namespace Logic
                 _stream = _tcpUser.GetStream();
                 byte[] buffer = new byte[4096];
 
-                // --- ЭТАП 1: РЕГИСТРАЦИЯ ---
+                // РЕГИСТРАЦИЯ
                 int byteRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
                 if (byteRead == 0)
                 {
@@ -81,13 +83,11 @@ namespace Logic
 
                 _logSystem($"TCP: Клиент {_clientEndpoint} зарегистрирован как '{_userName}'.");
 
-                // --- ЭТАП 2: ОТПРАВКА ИСТОРИИ И СПИСКА ---
                 await SendHistoryAsync();
 
-                // Вызываем callback, чтобы сервер обновил списки у ВСЕХ
                 await _broadcastUserListCallback.Invoke();
 
-                // --- ЭТАП 3: ЦИКЛ ЧТЕНИЯ PM ---
+                // Чтение личных сообщений
                 while (_tcpUser.Connected) 
                 {
                     byteRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
@@ -100,9 +100,7 @@ namespace Logic
                     string clientJson = Encoding.UTF8.GetString(buffer, 0, byteRead);
 
                     await ProcessTcpCommandAsync(clientJson);
-                    // TODO: Обработать приватное сообщение.
-                    // создать приватный метод ProcessPrivateMessage(clientJson)
-                    // _logSystem($"PM от {_userName}: {clientJson}");
+        
                 }
             }
             catch (IOException ex)
@@ -115,7 +113,7 @@ namespace Logic
             }
             finally
             {
-                // --- ЭТАП 4: ОЧИСТКА ---
+                //  ОЧИСТКА 
                 _stream?.Close();
                 _tcpUser?.Close();
 
@@ -140,18 +138,18 @@ namespace Logic
         {
             try
             {
-                // 1. "Подсматриваем" тип
+                // "Подсматриваем" тип
                 var baseMsg = JsonSerializer.Deserialize<TcpMessage>(json);
 
-                // 2. Выбираем, что делать
+                // Выбираем, что делать
                 switch (baseMsg.Type)
                 {
                     case "PrivateMessage":
                         await HandlePrivateMessageAsync(json);
                         break;
-
-                    // (Здесь в будущем могут быть "SetStatus", "ChangeName" и т.д.)    
-
+                    case "GetPrivateHistory":
+                        await HandlePrivateHistoryRequestAsync(json);
+                        break;
                     default:
                         _logSystem($"TCP: Неизвестный тип сообщения от '{_userName}': {baseMsg.Type}");
                         break;
@@ -163,28 +161,44 @@ namespace Logic
             }
         }
 
-        // --- НОВЫЙ ПРИВАТНЫЙ МЕТОД ---
+        private async Task HandlePrivateHistoryRequestAsync(string json)
+        {
+            var req = JsonSerializer.Deserialize<PrivateHistoryRequest>(json);
+            if (req == null) return;
+            _logSystem($"TCP: Клиент '{_userName}' запросил историю c '{req.WithUser}'.");
+            List<Message> history = _privateHistoryManager.GetHistory(_userName, req.WithUser);
+
+            var response = new PrivateHistoryResponse
+            {
+                WithUser = req.WithUser,
+                Messages = history
+            };
+
+            string jsonResponse = JsonSerializer.Serialize(response);
+            byte[] buffer = Encoding.UTF8.GetBytes(jsonResponse);
+            await _stream.WriteAsync(buffer, 0, buffer.Length);
+        }
+
         private async Task HandlePrivateMessageAsync(string json)
         {
-            // 1. Парсим полное сообщение
+            //Парсим полное сообщение
             var pmRequest = JsonSerializer.Deserialize<PrivateMessageRequest>(json);
             if (pmRequest == null) return;
 
             _logSystem($"TCP: PM от '{_userName}' для '{pmRequest.ToUser}'");
-
-            // 2. Ищем получателя
+            _privateHistoryManager.AddMessage(_userName, pmRequest.ToUser, pmRequest.Message);
+            // Ищем получателя
             TcpClient recipientClient = _userManager.GetUser(pmRequest.ToUser);
 
             if (recipientClient != null && recipientClient.Connected)
             {
-                // 3. Создаем сообщение "на доставку"
                 var relayMsg = new PrivateMessageRelay
                 {
-                    FromUser = _userName, // (Важно: _userName - это мы, отправитель)
+                    FromUser = _userName,
                     Message = pmRequest.Message
                 };
 
-                // 4. Сериализуем и отправляем
+                // Сериализуем и отправляем
                 string relayJson = JsonSerializer.Serialize(relayMsg);
                 byte[] buffer = Encoding.UTF8.GetBytes(relayJson);
 
@@ -192,9 +206,7 @@ namespace Logic
             }
             else
             {
-                // 5. (Опционально) Сказать отправителю, что юзер не найден
                 _logSystem($"TCP: Получатель '{pmRequest.ToUser}' не найден или оффлайн.");
-                // TODO: Отправить _stream.WriteAsync(...) сообщение об ошибке
             }
         }
 

@@ -32,6 +32,7 @@ namespace Logic
         // --- Менеджеры (Состояние) ---
         private readonly UsersManager _userManager = new UsersManager();
         private readonly ChatHistoryManager _historyManager = new ChatHistoryManager();
+        private readonly PrivateHistoryManager _privateHistoryManager = new PrivateHistoryManager();
 
         // --- Сервисы (Поведение) ---
         private readonly UdpService _udpService;
@@ -50,7 +51,7 @@ namespace Logic
             // Создаем сервисы, передавая им зависимости
             // (менеджеры и методы логирования)
             _udpService = new UdpService(_historyManager, LogMessages, LogSystem);
-            _tcpService = new TcpService(_userManager, _historyManager, LogSystem);
+            _tcpService = new TcpService(_userManager, _historyManager, LogSystem, _privateHistoryManager);
         }
 
         public void LogSystem(string msg)
@@ -88,11 +89,11 @@ namespace Logic
 
             LogSystem("Server stopping...");
             _isServerRunning = false;
-            // 1. Останавливаем "слушателей" (новые подключения)
+            //Останавливаем "слушателей" (новые подключения)
             _tcpService.Stop();
             _udpService.Stop();
 
-            // 2. Выбрасываем всех, кто уже подключен
+            //Выбрасываем всех, кто уже подключен
             _userManager.CloseAllConnections();
             LogSystem("Server stopped");
         }

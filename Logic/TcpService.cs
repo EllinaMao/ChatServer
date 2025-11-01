@@ -12,17 +12,18 @@ namespace Logic
         private readonly UsersManager _userManager;
         private readonly ChatHistoryManager _historyManager;
         private readonly Action<string> _logSystem; // Делегат для LogSystem
-
+        private readonly PrivateHistoryManager _privateHistoryManager;
         private const int TCP_PORT = 8002;
         private bool _isRunning = false;
 
-        public TcpService(UsersManager userManager, ChatHistoryManager historyManager, Action<string> logSystem)
+        public TcpService(UsersManager userManager, ChatHistoryManager historyManager, Action<string> logSystem, PrivateHistoryManager privateHistoryManager)
         {
             _userManager = userManager;
             _historyManager = historyManager;
             _logSystem = logSystem;
 
             _tcpListener = new TcpListener(IPAddress.Any, TCP_PORT);
+            _privateHistoryManager = privateHistoryManager;
         }
 
         public async Task StartListeningAsync()
@@ -43,7 +44,8 @@ namespace Logic
                         tcpClient,
                         _userManager,
                         _historyManager,
-                        BroadcastUserListAsync, // Передаем наш метод
+                        _privateHistoryManager, 
+                        BroadcastUserListAsync, 
                         _logSystem
                     );
 
